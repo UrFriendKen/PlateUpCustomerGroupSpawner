@@ -1,15 +1,15 @@
 ﻿using HarmonyLib;
-using KitchenCustomerGroupSpawner.Preferences;
 using KitchenLib;
-using KitchenLib.Event;
+using KitchenLib.References;
 using KitchenMods;
+using PreferenceSystem;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 
 // Namespace should have "Kitchen" in the beginning
 namespace KitchenCustomerGroupSpawner
-
 {
     public class Main : BaseMod, IModSystem
     {
@@ -18,7 +18,7 @@ namespace KitchenCustomerGroupSpawner
         // Mod Version must follow semver notation e.g. "1.2.3"
         public const string MOD_GUID = "IcedMilo.PlateUp.CustomerGroupSpawner";
         public const string MOD_NAME = "Customer Group Spawner";
-        public const string MOD_VERSION = "0.1.0";
+        public const string MOD_VERSION = "0.1.2";
         public const string MOD_AUTHOR = "IcedMilo";
         public const string MOD_GAMEVERSION = ">=1.1.3";
         // Game version this mod is designed for in semver
@@ -32,13 +32,16 @@ namespace KitchenCustomerGroupSpawner
         public const bool DEBUG_MODE = false;
 #endif
 
-        internal static PreferencesManager PrefManager;
+        internal static PreferenceSystemManager PrefManager;
         internal const string SPAWNER_ACTIVE_ID = "spawnerActive";
         internal const string MIN_GROUP_SIZE_ID = "minGroupSize";
         internal const string MAX_GROUP_SIZE_ID = "maxGroupSize";
         internal const string IS_CAT_ID = "isCat";
         internal const string SPAWN_INTERVAL_ID = "spawnInterval";
         internal const string GROUP_LIMIT_ID = "groupLimit";
+        internal const string GROUP_TOTAL_ID = "groupTotal";
+        internal const string CUSTOMER_TYPE_ID = "customerType";
+        internal static bool CustomerTypeRegistered = false;
 
         public Main() : base(MOD_GUID, MOD_NAME, MOD_AUTHOR, MOD_VERSION, MOD_GAMEVERSION, Assembly.GetExecutingAssembly()) { }
 
@@ -53,62 +56,149 @@ namespace KitchenCustomerGroupSpawner
 
         protected override void OnPostActivate(Mod mod)
         {
-            PrefManager = new PreferencesManager(MOD_GUID, MOD_NAME);
+            PrefManager = new PreferenceSystemManager(MOD_GUID, MOD_NAME);
             CreatePreferences();
         }
 
-        public override void PostActivate(Mod mod)
+        private int[] GenerateIntArray(string input, out string[] stringRepresentation, int[] addValuesBefore = null, int[] addValuesAfter = null, string prefix = "", string postfix = "")
         {
-            base.PostActivate(mod);
+            List<string> stringOutput = new List<string>();
+            List<int> output = new List<int>();
+            string[] ranges = input.Split(',');
+            foreach (string range in ranges)
+            {
+                string[] extents = range.Split('|');
+                int min = Convert.ToInt32(extents[0]);
+                int max;
+                int step;
+                switch (extents.Length)
+                {
+                    case 1:
+                        output.Add(min);
+                        stringOutput.Add($"{prefix}{min}{postfix}");
+                        continue;
+                    case 2:
+                        max = Convert.ToInt32(extents[1]);
+                        step = 1;
+                        break;
+                    case 3:
+                        max = Convert.ToInt32(extents[1]);
+                        step = Convert.ToInt32(extents[2]);
+                        break;
+                    default:
+                        continue;
+                }
+                for (int i = min; i <= max; i += step)
+                {
+                    output.Add(i);
+                    stringOutput.Add($"{prefix}{i}{postfix}");
+                }
+            }
+            stringRepresentation = stringOutput.ToArray();
+            if (addValuesBefore == null)
+                addValuesBefore = new int[0];
+            if (addValuesAfter == null)
+                addValuesAfter = new int[0];
+            return addValuesBefore.AddRangeToArray(output.ToArray()).AddRangeToArray(addValuesAfter);
         }
 
         private void CreatePreferences()
         {
-            PrefManager.AddLabel("Customer Group Spawner");
-            PrefManager.AddOption<int>(SPAWNER_ACTIVE_ID, "", -1, new int[] { -1, 0, 1 }, new string[] { "Disabled", "Practice Mode Only", "Practice Mode and Day" });
+            string[] strings;
 
-            PrefManager.AddLabel("Spawn Interval (seconds)");
-            List<int> values = new List<int>();
-            List<string> strings = new List<string>();
-            for (int i = 5; i < 100 + 1; i++)
+            PrefManager
+                .AddLabel("Customer Group Spawner")
+                .AddOption<int>(
+                    SPAWNER_ACTIVE_ID,
+                    -1,
+                    new int[] { -1, 0, 1 },
+                    new string[] { "Disabled", "Practice Mode Only", "Practice Mode and Day" })
+                .AddLabel("Spawn Interval (deciseconds)")
+                .AddOption<int>(
+                    SPAWN_INTERVAL_ID,
+                    30,
+                    GenerateIntArray("5|100", out strings),  //Decisecond
+                    strings)
+                .AddLabel("Min Group Size")
+                .AddOption<int>(
+                    MIN_GROUP_SIZE_ID,
+                    1,
+                    GenerateIntArray("1|80", out strings),
+                    strings)
+                .AddLabel("Max Group Size")
+                .AddOption<int>(
+                    MAX_GROUP_SIZE_ID,
+                    2,
+                    GenerateIntArray("1|80", out strings),
+                    strings)
+                .AddLabel("Max Queue Length")
+                .AddOption<int>(
+                    GROUP_LIMIT_ID,
+                    50,
+                    GenerateIntArray("5|1000|5", out strings, new int[] { -1 }, null),
+                    new string[] { $"Uncapped" }.AddRangeToArray(strings))
+
+                .AddLabel("Total Number of Groups")
+                .AddOption<int>(
+                    GROUP_TOTAL_ID,
+                    50,
+                    GenerateIntArray("0|1000|5", out strings, new int[] { -1 }, null),
+                    new string[] { $"Uncapped" }.AddRangeToArray(strings));
+
+            if (TryGetCustomerTypes(out int[] ids, out string[] names))
             {
-                values.Add(i);
-                strings.Add($"{i / 10}.{i % 10}");
+                PrefManager
+                    .AddLabel("Customer Type")
+                    .AddOption<int>(
+                        CUSTOMER_TYPE_ID,
+                        ids[0],
+                        ids,
+                        names);
+                CustomerTypeRegistered = true;
             }
-            PrefManager.AddOption<int>(SPAWN_INTERVAL_ID, "Spawn Interval", 30, values.ToArray(), strings.ToArray()); //Decisecond
-            
-            values.Clear();
-            strings.Clear();
-            for (int i = 1; i < 80 + 1; i++)
-            {
-                values.Add(i);
-                strings.Add($"{i}");
-            }
-            PrefManager.AddLabel("Min Group Size");
-            PrefManager.AddOption<int>(MIN_GROUP_SIZE_ID, "Min Group Size", 1, values.ToArray(), strings.ToArray());
-            PrefManager.AddLabel("Max Group Size");
-            PrefManager.AddOption<int>(MAX_GROUP_SIZE_ID, "Max Group Size", 2, values.ToArray(), strings.ToArray());
 
-            values.Clear();
-            strings.Clear();
-            for (int i = 5; i < 1000 + 1; i += 5)
-            {
-                values.Add(i);
-                strings.Add($"{i}");
-            }
-            PrefManager.AddLabel("Number of Groups Limit");
-            PrefManager.AddOption<int>(GROUP_LIMIT_ID, "Number of Groups Limit", 50, values.ToArray(), strings.ToArray());
+            PrefManager
+                .AddLabel("Model")
+                .AddOption<int>(
+                    IS_CAT_ID,
+                    -1,
+                    new int[] { -1, 0, 1 },
+                    new string[] { "Random", "Morphman", "Kitty Cat" });
 
-            PrefManager.AddLabel("Customer Type");
-            PrefManager.AddOption<int>(IS_CAT_ID, "Customer Type", -1, new int[] { -1, 0, 1 }, new string[] { "Random", "Morphman", "Kitty Cat" });
-
-
-
-            
             PrefManager.AddSpacer();
             PrefManager.AddSpacer();
 
-            PrefManager.RegisterMenu(PreferencesManager.MenuType.PauseMenu);
+            PrefManager.RegisterMenu(PreferenceSystemManager.MenuType.PauseMenu);
+        }
+
+        private bool TryGetCustomerTypes(out int[] ids, out string[] names)
+        {
+            try
+            {
+                CustomerTypeReferences reference = new CustomerTypeReferences();
+                FieldInfo[] fieldInfos = typeof(CustomerTypeReferences).GetFields();
+                ids = new int[fieldInfos.Length];
+                names = new string[fieldInfos.Length];
+
+                if (fieldInfos.Length == 0)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < fieldInfos.Length; i++)
+                {
+                    ids[i] = (int)fieldInfos[i].GetValue(reference);
+                    names[i] = fieldInfos[i].Name;
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                Main.LogError($"TryGetCustomerTypes error.\n{e.Message}\n{e.StackTrace}");
+                ids = new int[0];
+                names = new string[0];
+                return false;
+            }
         }
 
         #region Logging
