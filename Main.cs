@@ -1,36 +1,23 @@
 ﻿using HarmonyLib;
-using KitchenLib;
-using KitchenLib.References;
+using KitchenData;
 using KitchenMods;
 using PreferenceSystem;
 using System;
 using System.Collections.Generic;
-using System.Reflection;
+using System.Linq;
 using UnityEngine;
 
 // Namespace should have "Kitchen" in the beginning
 namespace KitchenCustomerGroupSpawner
 {
-    public class Main : BaseMod, IModSystem
+    public class Main : IModInitializer
     {
         // GUID must be unique and is recommended to be in reverse domain name notation
         // Mod Name is displayed to the player and listed in the mods menu
         // Mod Version must follow semver notation e.g. "1.2.3"
         public const string MOD_GUID = "IcedMilo.PlateUp.CustomerGroupSpawner";
         public const string MOD_NAME = "Customer Group Spawner";
-        public const string MOD_VERSION = "0.1.2";
-        public const string MOD_AUTHOR = "IcedMilo";
-        public const string MOD_GAMEVERSION = ">=1.1.3";
-        // Game version this mod is designed for in semver
-        // e.g. ">=1.1.3" current and all future
-        // e.g. ">=1.1.3 <=1.2.3" for all from/until
-
-        // Boolean constant whose value depends on whether you built with DEBUG or RELEASE mode, useful for testing
-#if DEBUG
-        public const bool DEBUG_MODE = true;
-#else
-        public const bool DEBUG_MODE = false;
-#endif
+        public const string MOD_VERSION = "0.1.4";
 
         internal static PreferenceSystemManager PrefManager;
         internal const string SPAWNER_ACTIVE_ID = "spawnerActive";
@@ -42,23 +29,24 @@ namespace KitchenCustomerGroupSpawner
         internal const string GROUP_TOTAL_ID = "groupTotal";
         internal const string CUSTOMER_TYPE_ID = "customerType";
         internal static bool CustomerTypeRegistered = false;
+        public Main()
+        {
+        }
 
-        public Main() : base(MOD_GUID, MOD_NAME, MOD_AUTHOR, MOD_VERSION, MOD_GAMEVERSION, Assembly.GetExecutingAssembly()) { }
-
-        protected override void OnInitialise()
+        public void PostActivate(Mod mod)
         {
             LogWarning($"{MOD_GUID} v{MOD_VERSION} in use!");
         }
 
-        protected override void OnUpdate()
+        public void PreInject()
         {
+            if (PrefManager == null)
+            {
+                CreatePreferences();
+            }
         }
 
-        protected override void OnPostActivate(Mod mod)
-        {
-            PrefManager = new PreferenceSystemManager(MOD_GUID, MOD_NAME);
-            CreatePreferences();
-        }
+        public void PostInject() { }
 
         private int[] GenerateIntArray(string input, out string[] stringRepresentation, int[] addValuesBefore = null, int[] addValuesAfter = null, string prefix = "", string postfix = "")
         {
@@ -106,6 +94,7 @@ namespace KitchenCustomerGroupSpawner
         {
             string[] strings;
 
+            PrefManager = new PreferenceSystemManager(MOD_GUID, MOD_NAME);
             PrefManager
                 .AddLabel("Customer Group Spawner")
                 .AddOption<int>(
@@ -175,21 +164,9 @@ namespace KitchenCustomerGroupSpawner
         {
             try
             {
-                CustomerTypeReferences reference = new CustomerTypeReferences();
-                FieldInfo[] fieldInfos = typeof(CustomerTypeReferences).GetFields();
-                ids = new int[fieldInfos.Length];
-                names = new string[fieldInfos.Length];
-
-                if (fieldInfos.Length == 0)
-                {
-                    return false;
-                }
-
-                for (int i = 0; i < fieldInfos.Length; i++)
-                {
-                    ids[i] = (int)fieldInfos[i].GetValue(reference);
-                    names[i] = fieldInfos[i].Name;
-                }
+                IEnumerable<CustomerType> customerTypes = GameData.Main.Get<CustomerType>();
+                ids = customerTypes.Select(x => x.ID).ToArray();
+                names = customerTypes.Select(x => x.name).ToArray();
                 return true;
             }
             catch (Exception e)
